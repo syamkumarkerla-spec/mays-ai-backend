@@ -1,99 +1,97 @@
-const express = require("express");
-const cors = require("cors");
-
-const OPENAI_API_KEY = process.env.OPENAI_API_KEY || "";
-const TAVILY_API_KEY = process.env.TAVILY_API_KEY || "";
+```js
+import express from "express";
+import cors from "cors";
+import fetch from "node-fetch";
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Health
-app.get("/", (req, res) => {
-  res.send("Mays AI Backend Running!");
-});
+// Load keys from Render environment
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+const TAVILY_API_KEY = process.env.TAVILY_API_KEY;
 
-// Tavily Search
+// 🔍 Tavily Real-Time Web Search
 async function webSearch(query) {
-  if (!TAVILY_API_KEY) return [];
-  try {
-    const r = await fetch("https://api.tavily.com/search", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${TAVILY_API_KEY}`
-      },
-      body: JSON.stringify({ query, max_results: 5 })
-    });
-
-    if (!r.ok) return [];
-    const j = await r.json();
-    return j.results || [];
-  } catch (e) {
-    console.error("Tavily error:", e.message);
-    return [];
-  }
-}
-
-// OpenAI Call
-async function callOpenAI(prompt) {
-  const r = await fetch("https://api.openai.com/v1/chat/completions", {
+  const response = await fetch("https://api.tavily.com/search", {
     method: "POST",
     headers: {
-      "Authorization": `Bearer ${OPENAI_API_KEY}`,
-      "Content-Type": "application/json"
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${TAVILY_API_KEY}`
     },
     body: JSON.stringify({
-      model: "gpt-4o-mini",
-      messages: [
-        {
-          role: "system",
-          content:
-            "You are Mays AI, created by Syam Kumar Kerla. Always use web snippets when provided."
-        },
-        { role: "user", content: prompt }
-      ],
-      max_tokens: 700,
-      temperature: 0.2
+      query,
+      max_results: 5
     })
   });
 
-  const j = await r.json();
-  return j.choices?.[0]?.message?.content || "No answer";
+  const data = await response.json();
+  return data.results || [];
 }
 
-// Main Ask Route
-app.post("/ask", async (req, res) => {
-  try {
-    const q = req.body.question || "";
-    if (!q.trim()) return res.status(400).json({ error: "No query" });
+// 🔥 OpenAI (GPT-4o-mini) Response
+async function askOpenAI(prompt) {
+  const response = await fetch("https://api.openai.com/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${OPENAI_API_KEY}`
+    },
+    body: JSON.stringify({
+      model: "gpt-4o-mini",
+      messages: [{ role: "user", content: prompt }],
+      temperature: 0.3
+    })
+  });
 
-    // Live web search
-    const snippets = await webSearch(q);
+  const data = await response.json();
+  return data.choices[0].message.content;
+}
 
-    const refs = snippets
-      .map((s, i) => `[${i + 1}] ${s.title}\n${s.url}\n${s.description || ""}`)
-      .join("\n\n");
+// 🧠 Create final combined prompt
+function buildPrompt(query, results) {
+  const snippets = results
+    .map((r, i) => `[${i+1}] ${r.title}\n${r.snippet}\n${r.url}`)
+    .join("\n\n");
 
-    const prompt = `
-Use the web data below to answer accurately. Cite numbers like [1].
+  return `
+Use the following live web search data to answer the question.
 
-WEB SNIPPETS:
-${refs}
+WEB SEARCH RESULTS:
+${snippets}
 
-QUESTION: ${q}
+QUESTION:
+${query}
 
-Give a clear, updated answer. Cite sources at the end.
+Answer using accurate **up-to-date info**.
 `;
+}
 
-    const answer = await callOpenAI(prompt);
+// 🌍 API Route
+app.post("/api/chat", async (req, res) => {
+  try {
+    const query = req.body.question;
 
-    res.json({ answer, sources: snippets });
+    // 1️⃣ Real web search
+    const results = await webSearch(query);
+
+    // 2️⃣ Build smart context for GPT
+    const finalPrompt = buildPrompt(query, results);
+
+    // 3️⃣ Ask GPT
+    const answer = await askOpenAI(finalPrompt);
+
+    res.json({ answer, sources: results });
   } catch (err) {
     res.json({ error: err.message });
   }
 });
 
-// Start Server
+// Root test
+app.get("/", (req, res) => {
+  res.send("Mays AI Backend with Tavily Search Running!");
+});
+
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log("Server running on", PORT));
+app.listen(PORT, () => console.log("Server running on " + PORT));
+```
