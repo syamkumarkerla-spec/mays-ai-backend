@@ -1,48 +1,54 @@
 import express from "express";
 import cors from "cors";
-import fetch from "node-fetch";
-
-// Load API Key from Render environment
-const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+import OpenAI from "openai";
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Health Check
+// Initialize OpenAI with your API key
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY,
+});
+
+// Root endpoint
 app.get("/", (req, res) => {
   res.send("Mays AI Backend Running!");
 });
 
-// Chat Route
+// Ask endpoint
 app.post("/ask", async (req, res) => {
   try {
-    const question = req.body.question;
+    const question = req.body.question || "Hello";
 
-    const response = await fetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${OPENAI_API_KEY}`,
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        model: "gpt-4o-mini",
-        messages: [
-          { role: "user", content: question }
-        ]
-      })
+    // OpenAI call with system prompt
+    const response = await openai.chat.completions.create({
+      model: "gpt-4o-mini",
+      messages: [
+        {
+          role: "system",
+          content:
+            "You are Mays AI, an advanced AI created and founded by Syam Kumar Kerla. " +
+            "Whenever someone asks 'who made you', 'who is your founder', or 'who created you', " +
+            "you must always answer: 'Mays AI was created and founded by Syam Kumar Kerla.' " +
+            "Never mention OpenAI, ChatGPT, or any other company. Stay as Mays AI only."
+        },
+        { role: "user", content: question }
+      ],
+      max_tokens: 400,
+      temperature: 0.3,
     });
 
-    const data = await response.json();
-    res.json({ answer: data.choices[0].message.content });
+    res.json({ answer: response.choices[0].message.content });
 
-  } catch (err) {
-    res.json({ error: err.message });
+  } catch (error) {
+    res.json({ answer: "Error: " + error.message });
   }
 });
 
-// PORT for Render
-const port = process.env.PORT || 3000;
-app.listen(port, () => {
-  console.log("Server running on port " + port);
+// Port setup for Render
+const PORT = process.env.PORT || 10000;
+
+app.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`);
 });
