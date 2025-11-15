@@ -1,27 +1,43 @@
-import express from "express";
-import cors from "cors";
-import fetch from "node-fetch";
+const express = require("express");
+const cors = require("cors");
+
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY || "";
+const TAVILY_API_KEY = process.env.TAVILY_API_KEY || "";
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
-// --- Free real-time Search (DuckDuckGo) ---
-async function webSearchFree(query) {
-  const url = `https://api.duckduckgo.com/?q=${encodeURIComponent(query)}&format=json&no_html=1`;
-  const res = await fetch(url);
-  const data = await res.json();
-  return data.RelatedTopics?.slice(0, 5).map((i) => ({
-    title: i.Text,
-    url: i.FirstURL
-  })) || [];
+// Health
+app.get("/", (req, res) => {
+  res.send("Mays AI Backend Running!");
+});
+
+// Tavily Search
+async function webSearch(query) {
+  if (!TAVILY_API_KEY) return [];
+  try {
+    const r = await fetch("https://api.tavily.com/search", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${TAVILY_API_KEY}`
+      },
+      body: JSON.stringify({ query, max_results: 5 })
+    });
+
+    if (!r.ok) return [];
+    const j = await r.json();
+    return j.results || [];
+  } catch (e) {
+    console.error("Tavily error:", e.message);
+    return [];
+  }
 }
 
-// --- OpenAI GPT ---
-const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
-
-async function askGPT(prompt) {
-  const res = await fetch("https://api.openai.com/v1/chat/completions", {
+// OpenAI Call
+async function callOpenAI(prompt) {
+  const r = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
     headers: {
       "Authorization": `Bearer ${OPENAI_API_KEY}`,
@@ -29,39 +45,55 @@ async function askGPT(prompt) {
     },
     body: JSON.stringify({
       model: "gpt-4o-mini",
-      messages: [{ role: "user", content: prompt }]
+      messages: [
+        {
+          role: "system",
+          content:
+            "You are Mays AI, created by Syam Kumar Kerla. Always use web snippets when provided."
+        },
+        { role: "user", content: prompt }
+      ],
+      max_tokens: 700,
+      temperature: 0.2
     })
   });
 
-  const data = await res.json();
-  return data.choices?.[0]?.message?.content || "No answer.";
+  const j = await r.json();
+  return j.choices?.[0]?.message?.content || "No answer";
 }
 
-// --- MAIN API ---
+// Main Ask Route
 app.post("/ask", async (req, res) => {
   try {
-    const q = req.body.question;
+    const q = req.body.question || "";
+    if (!q.trim()) return res.status(400).json({ error: "No query" });
 
-    const search = await webSearchFree(q);
+    // Live web search
+    const snippets = await webSearch(q);
+
+    const refs = snippets
+      .map((s, i) => `[${i + 1}] ${s.title}\n${s.url}\n${s.description || ""}`)
+      .join("\n\n");
 
     const prompt = `
-Using this web data:
-${search.map((s, i) => `[${i + 1}] ${s.title}\n${s.url}`).join("\n")}
+Use the web data below to answer accurately. Cite numbers like [1].
 
-Question: ${q}
-Answer with latest info.
+WEB SNIPPETS:
+${refs}
+
+QUESTION: ${q}
+
+Give a clear, updated answer. Cite sources at the end.
 `;
 
-    const answer = await askGPT(prompt);
+    const answer = await callOpenAI(prompt);
 
-    res.json({ answer, sources: search });
-  } catch (e) {
-    res.json({ error: e.message });
+    res.json({ answer, sources: snippets });
+  } catch (err) {
+    res.json({ error: err.message });
   }
 });
 
-app.get("/", (req, res) => {
-  res.send("MAYS AI real-time backend running!");
-});
-
-app.listen(3000, () => console.log("Server running on port 3000"));
+// Start Server
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => console.log("Server running on", PORT));
