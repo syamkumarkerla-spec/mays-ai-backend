@@ -1,17 +1,17 @@
 ```js
-import express from "express";
-import cors from "cors";
-import fetch from "node-fetch";
+const express = require("express");
+const cors = require("cors");
+const fetch = require("node-fetch");
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Load keys from Render environment
+// Environment keys
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const TAVILY_API_KEY = process.env.TAVILY_API_KEY;
 
-// 🔍 Tavily Real-Time Web Search
+// 🔍 Tavily Real-Time Search
 async function webSearch(query) {
   const response = await fetch("https://api.tavily.com/search", {
     method: "POST",
@@ -25,11 +25,10 @@ async function webSearch(query) {
     })
   });
 
-  const data = await response.json();
-  return data.results || [];
+  return await response.json();
 }
 
-// 🔥 OpenAI (GPT-4o-mini) Response
+// 🤖 OpenAI GPT Call
 async function askOpenAI(prompt) {
   const response = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
@@ -48,48 +47,42 @@ async function askOpenAI(prompt) {
   return data.choices[0].message.content;
 }
 
-// 🧠 Create final combined prompt
-function buildPrompt(query, results) {
-  const snippets = results
+// Build prompt
+function buildPrompt(query, search) {
+  const results = (search.results || [])
     .map((r, i) => `[${i+1}] ${r.title}\n${r.snippet}\n${r.url}`)
     .join("\n\n");
 
   return `
-Use the following live web search data to answer the question.
+Use this LIVE WEB SEARCH data:
 
-WEB SEARCH RESULTS:
-${snippets}
+${results}
 
 QUESTION:
 ${query}
 
-Answer using accurate **up-to-date info**.
+Give the latest accurate answer.
 `;
 }
 
-// 🌍 API Route
+// API
 app.post("/api/chat", async (req, res) => {
   try {
-    const query = req.body.question;
+    const q = req.body.question;
 
-    // 1️⃣ Real web search
-    const results = await webSearch(query);
-
-    // 2️⃣ Build smart context for GPT
-    const finalPrompt = buildPrompt(query, results);
-
-    // 3️⃣ Ask GPT
+    const search = await webSearch(q);
+    const finalPrompt = buildPrompt(q, search);
     const answer = await askOpenAI(finalPrompt);
 
-    res.json({ answer, sources: results });
+    res.json({ answer, sources: search.results });
   } catch (err) {
     res.json({ error: err.message });
   }
 });
 
-// Root test
+// Test
 app.get("/", (req, res) => {
-  res.send("Mays AI Backend with Tavily Search Running!");
+  res.send("Mays AI with Live Tavily Search Running!");
 });
 
 const PORT = process.env.PORT || 3000;
