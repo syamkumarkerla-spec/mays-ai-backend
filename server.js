@@ -2,12 +2,19 @@ import express from "express";
 import cors from "cors";
 import fetch from "node-fetch";
 
+// Load API Key from Render environment
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+
 const app = express();
 app.use(cors());
 app.use(express.json());
 
-const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+// Health Check
+app.get("/", (req, res) => {
+  res.send("Mays AI Backend Running!");
+});
 
+// Chat Route
 app.post("/ask", async (req, res) => {
   try {
     const question = req.body.question;
@@ -20,25 +27,22 @@ app.post("/ask", async (req, res) => {
       },
       body: JSON.stringify({
         model: "gpt-4o-mini",
-        messages: [{ role: "user", content: question }]
+        messages: [
+          { role: "user", content: question }
+        ]
       })
     });
 
     const data = await response.json();
-
-    return res.json({
-      answer: data.choices[0].message.content
-    });
+    res.json({ answer: data.choices[0].message.content });
 
   } catch (err) {
-    return res.json({ error: err.message });
+    res.json({ error: err.message });
   }
 });
 
-app.get("/", (req, res) => {
-  res.json({ status: "Mays AI Backend Running" });
-});
-
-app.listen(3000, () => {
-  console.log("Server running on port 3000");
+// PORT for Render
+const port = process.env.PORT || 3000;
+app.listen(port, () => {
+  console.log("Server running on port " + port);
 });
