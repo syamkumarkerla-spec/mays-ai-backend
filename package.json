@@ -1,89 +1,14 @@
-// server.js - Orchestrator for Mays AI (OpenAI + Bing search + placeholder for Gemini)
-import express from "express";
-import cors from "cors";
-import fetch from "node-fetch"; 
-import NodeCache from "node-cache";
-
-const app = express();
-app.use(cors());
-app.use(express.json());
-
-const cache = new NodeCache({ stdTTL: 300 });
-
-const OPENAI_KEY = process.env.OPENAI_API_KEY || "";
-const BING_KEY = process.env.BING_API_KEY || "";
-const GEMINI_KEY = process.env.GEMINI_KEY || "";
-
-if (!OPENAI_KEY) console.warn("OPENAI_API_KEY not set");
-if (!BING_KEY) console.warn("BING_API_KEY not set");
-
-// ---- Web Search (Bing) ----
-async function webSearchBing(query) {
-  if (!BING_KEY) return [];
-  const url = `https://api.bing.microsoft.com/v7.0/search?q=${encodeURIComponent(query)}&count=5`;
-  const res = await fetch(url, { headers: { "Ocp-Apim-Subscription-Key": BING_KEY } });
-  if (!res.ok) return [];
-  const data = await res.json();
-  return (data.webPages?.value || []).map(p => ({
-    title: p.name,
-    snippet: p.snippet,
-    url: p.url
-  }));
+{
+  "name": "mays-ai-backend",
+  "version": "1.0.0",
+  "main": "server.js",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "cors": "^2.8.5",
+    "node-fetch": "^3.3.2"
+  }
 }
-
-// ---- ChatGPT Call ----
-async function callOpenAI(prompt) {
-  const res = await fetch("https://api.openai.com/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      "Authorization": `Bearer ${OPENAI_KEY}`,
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify({
-      model: "gpt-4o-mini",
-      messages: [{ role: "user", content: prompt }],
-      max_tokens: 700,
-      temperature: 0.1
-    })
-  });
-  const j = await res.json();
-  return j?.choices?.[0]?.message?.content || null;
-}
-
-function makePrompt(snippets, q) {
-  const refs = snippets.map(
-    (s, i) => `${i + 1}) ${s.title}\n${s.snippet}\n${s.url}`
-  ).join("\n\n");
-
-  return `Use the web data below. Cite snippet numbers like [1].
-
-WEB SNIPPETS:
-${refs}
-
-QUESTION: ${q}
-
-Answer concisely with correct up-to-date info.
-`;
-}
-
-app.get("/", (req, res) => res.send("Mays AI Backend Running!"));
-
-// ---- Main API ----
-app.post("/api/query", async (req, res) => {
-  const q = req.body.query || "";
-  if (!q) return res.status(400).json({ error: "No query" });
-
-  const cached = cache.get(q);
-  if (cached) return res.json(cached);
-
-  const snippets = await webSearchBing(q);
-  const prompt = makePrompt(snippets, q);
-  const llm = await callOpenAI(prompt);
-
-  const final = { answer: llm, sources: snippets };
-  cache.set(q, final);
-  res.json(final);
-});
-
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log("Mays AI running on " + PORT));
