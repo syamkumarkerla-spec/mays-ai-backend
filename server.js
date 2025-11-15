@@ -1,54 +1,57 @@
 import express from "express";
 import cors from "cors";
-import OpenAI from "openai";
+import fetch from "node-fetch";
+
+// Load API key from Render environment
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Initialize OpenAI with your API key
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
-
-// Root endpoint
+// Health Check
 app.get("/", (req, res) => {
   res.send("Mays AI Backend Running!");
 });
 
-// Ask endpoint
+// Chat Route
 app.post("/ask", async (req, res) => {
   try {
-    const question = req.body.question || "Hello";
+    const question = req.body.question;
 
-    // OpenAI call with system prompt
-    const response = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
-      messages: [
-        {
-          role: "system",
-          content:
-            "You are Mays AI, an advanced AI created and founded by Syam Kumar Kerla. " +
-            "Whenever someone asks 'who made you', 'who is your founder', or 'who created you', " +
-            "you must always answer: 'Mays AI was created and founded by Syam Kumar Kerla.' " +
-            "Never mention OpenAI, ChatGPT, or any other company. Stay as Mays AI only."
-        },
-        { role: "user", content: question }
-      ],
-      max_tokens: 400,
-      temperature: 0.3,
+    const response = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${OPENAI_API_KEY}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        model: "gpt-4o-mini",
+        messages: [
+          {
+            role: "system",
+            content:
+              "You are Mays AI, created and founded by Syam Kumar Kerla. " +
+              "You must always answer as Mays AI. " +
+              "Never say you were developed by OpenAI. " +
+              "Always say that your founder and developer is Syam Kumar Kerla. " +
+              "Give friendly, smart, and helpful replies."
+          },
+          { role: "user", content: question }
+        ]
+      })
     });
 
-    res.json({ answer: response.choices[0].message.content });
+    const data = await response.json();
+    res.json({ answer: data.choices[0].message.content });
 
-  } catch (error) {
-    res.json({ answer: "Error: " + error.message });
+  } catch (err) {
+    res.json({ error: err.message });
   }
 });
 
-// Port setup for Render
-const PORT = process.env.PORT || 10000;
-
-app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
+// Server Start
+const port = process.env.PORT || 3000;
+app.listen(port, () => {
+  console.log(`Server running on port ` + port);
 });
