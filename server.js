@@ -6,11 +6,11 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Environment keys
+// Environment Keys
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const TAVILY_API_KEY = process.env.TAVILY_API_KEY;
 
-// 🔍 Tavily Real-Time Search
+// === Tavily Real-Time Web Search ===
 async function webSearch(query) {
   const response = await fetch("https://api.tavily.com/search", {
     method: "POST",
@@ -27,7 +27,7 @@ async function webSearch(query) {
   return await response.json();
 }
 
-// 🤖 OpenAI GPT Call
+// === OpenAI GPT Call ===
 async function askOpenAI(prompt) {
   const response = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
@@ -37,8 +37,18 @@ async function askOpenAI(prompt) {
     },
     body: JSON.stringify({
       model: "gpt-4o-mini",
-      messages: [{ role: "user", content: prompt }],
-      temperature: 0.3
+      temperature: 0.3,
+      messages: [
+        {
+          role: "system",
+          content:
+            "You are Mays AI, created and founded by Syam Kumar Kerla. Always use web search data. Always answer with updated information."
+        },
+        {
+          role: "user",
+          content: prompt
+        }
+      ]
     })
   });
 
@@ -46,44 +56,45 @@ async function askOpenAI(prompt) {
   return data.choices[0].message.content;
 }
 
-// Build prompt
-function buildPrompt(query, search) {
+// === Build Prompt ===
+function buildPrompt(question, search) {
   const results = (search.results || [])
-    .map((r, i) => `[${i+1}] ${r.title}\n${r.snippet}\n${r.url}`)
+    .map((r, i) => `[${i + 1}] ${r.title}\n${r.snippet}\n${r.url}`)
     .join("\n\n");
 
   return `
-Use this LIVE WEB SEARCH data:
-
+WEB SEARCH RESULTS:
 ${results}
 
 QUESTION:
-${query}
+${question}
 
-Give the latest accurate answer.
+Give latest accurate answer using sources.
 `;
 }
 
-// API
+// === API ROUTE ===
 app.post("/api/chat", async (req, res) => {
   try {
     const q = req.body.question;
+    if (!q) return res.json({ error: "No question provided" });
 
     const search = await webSearch(q);
-    const finalPrompt = buildPrompt(q, search);
-    const answer = await askOpenAI(finalPrompt);
+    const prompt = buildPrompt(q, search);
+    const answer = await askOpenAI(prompt);
 
-    res.json({ answer, sources: search.results });
+    res.json({
+      answer,
+      sources: search.results || []
+    });
+
   } catch (err) {
     res.json({ error: err.message });
   }
 });
 
-// Test
-app.get("/", (req, res) => {
-  res.send("Mays AI with Live Tavily Search Running!");
+// === SERVER START ===
+const port = process.env.PORT || 3000;
+app.listen(port, () => {
+  console.log("Server running on port " + port);
 });
-
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log("Server running on " + PORT));
-```
