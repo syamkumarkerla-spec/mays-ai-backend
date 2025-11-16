@@ -6,58 +6,57 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Environment Keys
+// 🔑 Environment Keys
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const TAVILY_API_KEY = process.env.TAVILY_API_KEY;
 
-// === Tavily Real-Time Web Search ===
+// 🌐 Tavily — Real Time Web Search
 async function webSearch(query) {
-  const response = await fetch("https://api.tavily.com/search", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "Authorization": `Bearer ${TAVILY_API_KEY}`
-    },
-    body: JSON.stringify({
-      query,
-      max_results: 5
-    })
-  });
+  try {
+    const response = await fetch("https://api.tavily.com/search", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${TAVILY_API_KEY}`
+      },
+      body: JSON.stringify({
+        query,
+        max_results: 5
+      })
+    });
 
-  return await response.json();
+    return await response.json();
+  } catch (e) {
+    console.log("Tavily Error:", e);
+    return { results: [] };
+  }
 }
 
-// === OpenAI GPT Call ===
+// 🤖 Ask ChatGPT (OpenAI)
 async function askOpenAI(prompt) {
-  const response = await fetch("https://api.openai.com/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "Authorization": `Bearer ${OPENAI_API_KEY}`
-    },
-    body: JSON.stringify({
-      model: "gpt-4o-mini",
-      temperature: 0.3,
-      messages: [
-        {
-          role: "system",
-          content:
-            "You are Mays AI, created and founded by Syam Kumar Kerla. Always use web search data. Always answer with updated information."
-        },
-        {
-          role: "user",
-          content: prompt
-        }
-      ]
-    })
-  });
+  try {
+    const response = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${OPENAI_API_KEY}`
+      },
+      body: JSON.stringify({
+        model: "gpt-4o-mini",
+        messages: [{ role: "user", content: prompt }],
+        temperature: 0.3
+      })
+    });
 
-  const data = await response.json();
-  return data.choices[0].message.content;
+    const data = await response.json();
+    return data.choices[0].message.content;
+  } catch (e) {
+    return "OpenAI Error: " + e.message;
+  }
 }
 
-// === Build Prompt ===
-function buildPrompt(question, search) {
+// Build AI Prompt
+function buildPrompt(query, search) {
   const results = (search.results || [])
     .map((r, i) => `[${i + 1}] ${r.title}\n${r.snippet}\n${r.url}`)
     .join("\n\n");
@@ -67,13 +66,13 @@ WEB SEARCH RESULTS:
 ${results}
 
 QUESTION:
-${question}
+${query}
 
-Give latest accurate answer using sources.
+Give the MOST UPDATED answer.
 `;
 }
 
-// === API ROUTE ===
+// API Route — This is what frontend calls
 app.post("/api/chat", async (req, res) => {
   try {
     const q = req.body.question;
@@ -83,18 +82,14 @@ app.post("/api/chat", async (req, res) => {
     const prompt = buildPrompt(q, search);
     const answer = await askOpenAI(prompt);
 
-    res.json({
-      answer,
-      sources: search.results || []
-    });
-
+    res.json({ answer, sources: search.results || [] });
   } catch (err) {
     res.json({ error: err.message });
   }
 });
 
-// === SERVER START ===
-const port = process.env.PORT || 3000;
-app.listen(port, () => {
-  console.log("Server running on port " + port);
+// Server Start
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+  console.log("Server running on port " + PORT);
 });
