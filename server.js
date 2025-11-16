@@ -1,133 +1,110 @@
 // server.js
+
 const express = require("express");
 const cors = require("cors");
-const fetch = require("node-fetch"); // node-fetch package must be in package.json
+const fetch = require("node-fetch");
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
-// === Environment keys (set these in Render / environment variables)
+// ====== ENVIRONMENT KEYS ======
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
-const TAVILY_API_KEY = process.env.TAVILY_API_KEY;
+const SERP_API_KEY = process.env.SERP_API_KEY;
 
-if (!OPENAI_API_KEY) console.warn("OPENAI_API_KEY missing!");
-if (!TAVILY_API_KEY) console.warn("TAVILY_API_KEY missing!");
+if (!OPENAI_API_KEY) console.warn("Missing OPENAI_API_KEY");
+if (!SERP_API_KEY) console.warn("Missing SERP_API_KEY");
 
-// --- Tavily real-time web search
-async function webSearchTavily(query) {
-  if (!TAVILY_API_KEY) return { results: [], error: "No TAVILY_API_KEY" };
+// ====== GOOGLE REAL-TIME SEARCH (SerpAPI) ======
+async function googleSearch(query) {
   try {
-    const res = await fetch("https://api.tavily.com/search", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${TAVILY_API_KEY}`
-      },
-      body: JSON.stringify({
-        query,
-        max_results: 5
-      })
-    });
-    if (!res.ok) {
-      const text = await res.text().catch(()=>"<no body>");
-      return { results: [], error: `Tavily responded ${res.status}: ${text}` };
-    }
+    const url = `https://serpapi.com/search.json?q=${encodeURIComponent(
+      query
+    )}&engine=google&api_key=${SERP_API_KEY}`;
+
+    const res = await fetch(url);
     const data = await res.json();
-    const results = (data.results || data.items || data.webPages || []).map(r => ({
-      title: r.title || r.name || "",
-      snippet: r.snippet || r.description || r.text || "",
-      url: r.url || r.link || r.source || ""
-    })).slice(0, 5);
-    return { results };
+
+    if (!data.organic_results) return [];
+
+    return data.organic_results.slice(0, 5).map((r) => ({
+      title: r.title || "",
+      snippet: r.snippet || "",
+      url: r.link || "",
+    }));
   } catch (e) {
-    return { results: [], error: e.message || String(e) };
+    console.log("SerpAPI Error:", e);
+    return [];
   }
 }
 
-// --- OpenAI Chat call
+// ====== OPENAI CALL ======
 async function askOpenAI(prompt) {
-  if (!OPENAI_API_KEY) return "OpenAI API key not set";
   try {
     const res = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "Authorization": `Bearer ${OPENAI_API_KEY}`
+        Authorization: `Bearer ${OPENAI_API_KEY}`,
       },
       body: JSON.stringify({
-        model: "gpt-4o-mini", // change model if needed
+        model: "gpt-4o-mini",
         messages: [
-          { role: "system", content:
-            "You are Mays AI. Use the web data provided below and produce a short, accurate, up-to-date answer. Cite source numbers in square brackets like [1]. If web data is unavailable, say so and provide best current knowledge." },
-          { role: "user", content: prompt }
+          { role: "system", content: "Give the latest verified answer using web search." },
+          { role: "user", content: prompt },
         ],
-        max_tokens: 800,
-        temperature: 0.2
-      })
+        temperature: 0.2,
+      }),
     });
 
-    if (!res.ok) {
-      const text = await res.text().catch(()=>"<no body>");
-      return `OpenAI error ${res.status}: ${text}`;
-    }
     const json = await res.json();
-    return json?.choices?.[0]?.message?.content || "No completion from OpenAI";
+    return json.choices?.[0]?.message?.content || "No response from OpenAI";
   } catch (e) {
-    return `OpenAI Error: ${e.message || String(e)}`;
+    return "OpenAI Error: " + e.message;
   }
 }
 
-// --- Build a prompt for the LLM using the web results
-function buildPrompt(question, sources) {
-  let refs = "";
-  sources.forEach((s, i) => {
-    refs += `[${i+1}] ${s.title}\n${s.snippet}\n${s.url}\n\n`;
-  });
+// ====== BUILD PROMPT ======
+function buildPrompt(question, results) {
+  let text = "WEB SEARCH RESULTS:\n\n";
 
-  return `
-WEB SEARCH RESULTS:
-${refs || "No web search results found."}
+  if (!results.length) {
+    text += "No live web results found.\n\n";
+  } else {
+    results.forEach((r, i) => {
+      text += `[${i + 1}] ${r.title}\n${r.snippet}\n${r.url}\n\n`;
+    });
+  }
 
-QUESTION:
-${question}
+  text += `QUESTION:\n${question}\n\nGive the latest correct answer using above results.`;
 
-INSTRUCTIONS: Use the web data above to give the most up-to-date accurate answer. Cite snippet numbers in square brackets such as [1]. If web data is empty, say "No web results" and answer with best-known info.
-  `;
+  return text;
 }
 
-// --- API route used by frontend
+// ====== MAIN API ROUTE ======
 app.post("/api/chat", async (req, res) => {
   try {
-    const q = (req.body?.question || "").toString().trim();
-    if (!q) return res.status(400).json({ error: "No question provided" });
+    const q = req.body.question;
+    if (!q) return res.json({ error: "No question provided" });
 
-    // 1) Get web results
-    const tavily = await webSearchTavily(q);
-    const sources = tavily.results || [];
+    // Live search
+    const search = await googleSearch(q);
 
-    // 2) Build prompt and call OpenAI
-    const prompt = buildPrompt(q, sources);
+    // Build prompt for OpenAI
+    const prompt = buildPrompt(q, search);
+
+    // Get final AI answer
     const answer = await askOpenAI(prompt);
 
-    // 3) Return best result + sources + any errors
     res.json({
       answer,
-      sources,
-      errors: {
-        tavily: tavily.error || null
-      }
+      sources: search,
     });
   } catch (err) {
-    res.json({ error: err.message || String(err) });
+    res.json({ error: err.message });
   }
 });
 
-// Health route
-app.get("/", (req, res) => res.send("Mays AI Backend Running!"));
-
-// Start server
+// ====== START SERVER ======
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log("Server running on port " + PORT);
-});
+app.listen(PORT, () => console.log("Server running on port " + PORT));
